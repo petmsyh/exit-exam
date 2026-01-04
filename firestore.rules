@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get user document
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if user is approved student
+    function isApprovedStudent() {
+      return isAuthenticated() && 
+             getUserData().role == 'student' && 
+             getUserData().status == 'approved';
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             (getUserData().role == 'admin' || getUserData().role == 'superAdmin');
+    }
+    
+    // Helper function to check if user is super admin
+    function isSuperAdmin() {
+      return isAuthenticated() && getUserData().role == 'superAdmin';
+    }
+    
+    // Helper function to check if user belongs to department
+    function belongsToDepartment(departmentId) {
+      return getUserData().departmentId == departmentId;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+    }
+    
+    // Departments collection
+    match /departments/{departmentId} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+    
+    // Courses collection
+    match /courses/{courseId} {
+      allow read: if isAuthenticated() && 
+                     (isApprovedStudent() && belongsToDepartment(resource.data.departmentId)) ||
+                     (isAdmin() && belongsToDepartment(resource.data.departmentId));
+      allow write: if isAdmin() && belongsToDepartment(resource.data.departmentId);
+    }
+    
+    // Modules collection
+    match /modules/{moduleId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    
+    // Materials collection
+    match /materials/{materialId} {
+      allow read: if isAuthenticated() && 
+                     (isApprovedStudent() && belongsToDepartment(resource.data.departmentId)) ||
+                     (isAdmin() && belongsToDepartment(resource.data.departmentId));
+      allow write: if isAdmin() && belongsToDepartment(request.resource.data.departmentId);
+    }
+    
+    // Past questions collection
+    match /past_questions/{questionId} {
+      allow read: if isApprovedStudent() && belongsToDepartment(resource.data.departmentId);
+      allow write: if isAdmin() && belongsToDepartment(request.resource.data.departmentId);
+    }
+    
+    // AI questions collection
+    match /ai_questions/{questionId} {
+      allow read: if isApprovedStudent() && 
+                     resource.data.approved == true && 
+                     belongsToDepartment(resource.data.departmentId);
+      allow write: if isAdmin() && belongsToDepartment(request.resource.data.departmentId);
+    }
+  }
+}
